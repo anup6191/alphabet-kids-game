@@ -80,6 +80,36 @@ function getLevelInfo(points) {
   }
 }
 
+function getKidLikeVoice() {
+  const voices = window.speechSynthesis?.getVoices?.() || []
+
+  const preferredNames = [
+    'samantha',
+    'zira',
+    'karen',
+    'victoria',
+    'google uk english female',
+    'daniel',
+    'google us english',
+    'google uk english male'
+  ]
+
+  const preferredVoice = voices.find((voice) => {
+    const name = voice.name.toLowerCase()
+    const lang = voice.lang.toLowerCase()
+    return (
+      /en/.test(lang) && (
+        preferredNames.some((keyword) => name.includes(keyword)) ||
+        /female|girl|child|kid|young/.test(name)
+      )
+    )
+  })
+
+  if (preferredVoice) return preferredVoice
+
+  return voices.find((voice) => /en/.test(voice.lang.toLowerCase())) || null
+}
+
 function playTone(frequency = 440, duration = 0.24, volume = 0.04) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext
   if (!AudioCtx) return
@@ -107,12 +137,27 @@ function playCorrectSound() {
 
 function speakText(text) {
   if (!('speechSynthesis' in window)) return
-  window.speechSynthesis.cancel()
+
   const utterance = new SpeechSynthesisUtterance(text)
+  const applyVoice = () => {
+    const selectedVoice = getKidLikeVoice()
+    if (selectedVoice) {
+      utterance.voice = selectedVoice
+    }
+  }
+
+  if (window.speechSynthesis.getVoices().length > 0) {
+    applyVoice()
+  } else {
+    window.speechSynthesis.onvoiceschanged = () => applyVoice()
+  }
+
   utterance.lang = 'en-US'
-  utterance.rate = 0.9
-  utterance.pitch = 1.2
+  utterance.rate = 0.82
+  utterance.pitch = 1.65
   utterance.volume = 1
+
+  window.speechSynthesis.cancel()
   window.speechSynthesis.speak(utterance)
 }
 
