@@ -80,32 +80,32 @@ function getLevelInfo(points) {
   }
 }
 
-function getKidLikeVoice() {
+function getKidLikeVoice(mode = 'natural') {
   const voices = window.speechSynthesis?.getVoices?.() || []
-
   const preferredNames = [
     'samantha',
     'zira',
     'karen',
     'victoria',
     'google uk english female',
-    'daniel',
     'google us english',
-    'google uk english male'
+    'susan',
+    'aria',
+    'jenny',
+    'olivia',
+    'moira'
   ]
 
-  const preferredVoice = voices.find((voice) => {
+  const preferred = voices.filter((voice) => {
     const name = voice.name.toLowerCase()
     const lang = voice.lang.toLowerCase()
-    return (
-      /en/.test(lang) && (
-        preferredNames.some((keyword) => name.includes(keyword)) ||
-        /female|girl|child|kid|young/.test(name)
-      )
+    return /en/.test(lang) && (
+      preferredNames.some((keyword) => name.includes(keyword)) ||
+      /female|girl|young|child|kid/.test(name)
     )
   })
 
-  if (preferredVoice) return preferredVoice
+  if (preferred.length > 0) return preferred[0]
 
   return voices.find((voice) => /en/.test(voice.lang.toLowerCase())) || null
 }
@@ -135,12 +135,12 @@ function playCorrectSound() {
   setTimeout(() => playTone(1040, 0.18, 0.06), 240)
 }
 
-function speakText(text) {
+function speakText(text, mode = 'natural') {
   if (!('speechSynthesis' in window)) return
 
   const utterance = new SpeechSynthesisUtterance(text)
   const applyVoice = () => {
-    const selectedVoice = getKidLikeVoice()
+    const selectedVoice = getKidLikeVoice(mode)
     if (selectedVoice) {
       utterance.voice = selectedVoice
     }
@@ -153,8 +153,8 @@ function speakText(text) {
   }
 
   utterance.lang = 'en-US'
-  utterance.rate = 0.82
-  utterance.pitch = 1.65
+  utterance.rate = mode === 'soft' ? 0.7 : mode === 'cheerful' ? 0.95 : 0.82
+  utterance.pitch = mode === 'soft' ? 1.45 : mode === 'cheerful' ? 1.8 : 1.65
   utterance.volume = 1
 
   window.speechSynthesis.cancel()
@@ -192,6 +192,7 @@ function App() {
   const [quiz, setQuiz] = useState(() => createQuizQuestion('letters'))
   const [confetti, setConfetti] = useState([])
   const [soundOn, setSoundOn] = useState(true)
+  const [voiceMode, setVoiceMode] = useState('natural')
   const [questionNumber, setQuestionNumber] = useState(1)
   const [streak, setStreak] = useState(0)
 
@@ -274,10 +275,10 @@ function App() {
     if (!soundOn) return
 
     if (type === 'letter') {
-      speakText(`${label} for ${word}`)
+      speakText(`${label} for ${word}`, voiceMode)
       playTone(520 + label.charCodeAt(0) * 2, 0.24, 0.045)
     } else {
-      speakText(`${label} ${word}`)
+      speakText(`${label} ${word}`, voiceMode)
       playTone(240 + Number(label) * 12, 0.28, 0.05)
     }
   }
@@ -309,7 +310,7 @@ function App() {
 
     if (soundOn) {
       playCorrectSound()
-      speakText('Yay! Great job!')
+      speakText('Yay! Great job!', 'cheerful')
     }
     makeConfetti()
 
@@ -326,7 +327,7 @@ function App() {
       setStreak(0)
       if (soundOn) {
         playTone(220, 0.12, 0.05)
-        speakText('Try again!')
+        speakText('Try again!', 'soft')
       }
     }
   }
@@ -355,7 +356,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, soundOn])
+  }, [mode, soundOn, voiceMode])
 
   const handleLetterPress = (letter) => {
     const key = letter.toLowerCase()
@@ -385,6 +386,27 @@ function App() {
             <button className="sound-toggle" onClick={() => setSoundOn((prev) => !prev)}>
               {soundOn ? '🔊 Sound On' : '🔇 Mute'}
             </button>
+
+            <div className="voice-switcher" aria-label="voice mode selector">
+              <button
+                className={voiceMode === 'natural' ? 'voice-button active' : 'voice-button'}
+                onClick={() => setVoiceMode('natural')}
+              >
+                Natural
+              </button>
+              <button
+                className={voiceMode === 'soft' ? 'voice-button active' : 'voice-button'}
+                onClick={() => setVoiceMode('soft')}
+              >
+                Soft
+              </button>
+              <button
+                className={voiceMode === 'cheerful' ? 'voice-button active' : 'voice-button'}
+                onClick={() => setVoiceMode('cheerful')}
+              >
+                Cheerful
+              </button>
+            </div>
 
             <div className="score-box">
               <span>⭐ {stars}</span>
