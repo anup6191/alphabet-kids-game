@@ -161,49 +161,84 @@ function speakText(text, mode = 'natural') {
   window.speechSynthesis.speak(utterance)
 }
 
-function getRandomItem(items) {
-  return items[Math.floor(Math.random() * items.length)]
+const STORAGE_KEY = 'abc-123-adventure'
+
+function loadSaved() {
+  try {
+    return JSON.parse(window.localStorage.getItem(STORAGE_KEY)) || {}
+  } catch {
+    return {}
+  }
 }
 
-function createQuizQuestion(type) {
+function saveProgress(data) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(data))
+  } catch {
+    // Storage can be blocked (private mode); the game still works without it.
+  }
+}
+
+function shuffle(items) {
+  const copy = [...items]
+  for (let i = copy.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1))
+    ;[copy[i], copy[j]] = [copy[j], copy[i]]
+  }
+  return copy
+}
+
+let quizCounter = 0
+
+function createQuizQuestion(type, previousKey = null) {
   const source = type === 'letters' ? allLetters : allNumbers
-  const correct = getRandomItem(source)
-  const wrongAnswers = source.filter((item) => item.key !== correct.key).slice(0, 3)
-  const options = [...wrongAnswers, correct].sort(() => Math.random() - 0.5)
+  const candidates = source.filter((item) => item.key !== previousKey)
+  const correct = candidates[Math.floor(Math.random() * candidates.length)]
+  const wrongAnswers = shuffle(source.filter((item) => item.key !== correct.key)).slice(0, 3)
+  const options = shuffle([...wrongAnswers, correct])
+  quizCounter += 1
 
   return {
+    id: quizCounter,
     type,
     correct,
     options,
-    prompt: type === 'letters' ? `Which word starts with ${correct.key}?` : `What number is this?`,
-    label: type === 'letters' ? correct.key : correct.key.toString()
+    prompt: type === 'letters' ? `Which picture starts with ${correct.key}?` : 'How many do you see?'
   }
 }
 
 function App() {
+  const [saved] = useState(loadSaved)
   const [mode, setMode] = useState('letters')
   const [view, setView] = useState('learn')
   const [currentKey, setCurrentKey] = useState('A')
   const [currentWord, setCurrentWord] = useState('Apple')
   const [currentEmoji, setCurrentEmoji] = useState('🍎')
-  const [score, setScore] = useState(0)
-  const [points, setPoints] = useState(0)
-  const [stars, setStars] = useState(0)
+  const [score, setScore] = useState(saved.score || 0)
+  const [points, setPoints] = useState(saved.points || 0)
+  const [stars, setStars] = useState(saved.stars || 0)
+  const [bestStreak, setBestStreak] = useState(saved.bestStreak || 0)
   const [quiz, setQuiz] = useState(() => createQuizQuestion('letters'))
+  const [answered, setAnswered] = useState(false)
+  const [wrongKeys, setWrongKeys] = useState([])
   const [confetti, setConfetti] = useState([])
-  const [soundOn, setSoundOn] = useState(true)
-  const [voiceMode, setVoiceMode] = useState('natural')
+  const [soundOn, setSoundOn] = useState(saved.soundOn ?? true)
+  const [musicOn, setMusicOn] = useState(saved.musicOn ?? false)
+  const [voiceMode, setVoiceMode] = useState(saved.voiceMode || 'natural')
   const [questionNumber, setQuestionNumber] = useState(1)
   const [streak, setStreak] = useState(0)
+  const [levelUp, setLevelUp] = useState(null)
 
   const musicRef = useRef({ interval: null, context: null })
+  const levelRef = useRef(null)
+  const quizIdRef = useRef(quiz.id)
 
   const letters = useMemo(() => allLetters, [])
   const numbers = useMemo(() => allNumbers, [])
   const levelInfo = useMemo(() => getLevelInfo(points), [points])
 
   const startMusic = () => {
-    if (!soundOn) return
+    if (!soundOn || !musicOn) return
 
     const AudioCtx = window.AudioContext || window.webkitAudioContext
     if (!AudioCtx) return
@@ -253,19 +288,62 @@ function App() {
   }
 
   useEffect(() => {
-    if (soundOn) {
+    if (soundOn && musicOn) {
       startMusic()
-    } else {
-      stopMusic()
-      if ('speechSynthesis' in window) {
-        window.speechSynthesis.cancel()
+      // Browsers keep audio suspended until the first tap or key press.
+      const resume = () => musicRef.current.context?.resume?.()
+      window.addEventListener('pointerdown', resume, { once: true })
+      window.addEventListener('keydown', resume, { once: true })
+      return () => {
+        window.removeEventListener('pointerdown', resume)
+        window.removeEventListener('keydown', resume)
+        stopMusic()
       }
     }
 
-    return () => {
-      stopMusic()
+    stopMusic()
+    if (!soundOn && 'speechSynthesis' in window) {
+      window.speechSynthesis.cancel()
     }
-  }, [soundOn])
+  }, [soundOn, musicOn])
+
+  useEffect(() => {
+    saveProgress({ score, points, stars, bestStreak, soundOn, musicOn, voiceMode })
+  }, [score, points, stars, bestStreak, soundOn, musicOn, voiceMode])
+
+  useEffect(() => {
+    quizIdRef.current = quiz.id
+  }, [quiz.id])
+
+  const showQuestion = (question) => {
+    setQuiz(question)
+    setAnswered(false)
+    setWrongKeys([])
+  }
+
+  const switchMode = () => {
+    const nextMode = mode === 'letters' ? 'numbers' : 'letters'
+    const first = nextMode === 'letters' ? allLetters[0] : allNumbers[0]
+    setMode(nextMode)
+    setCurrentKey(String(first.key))
+    setCurrentWord(first.word)
+    setCurrentEmoji(first.emoji)
+    showQuestion(createQuizQuestion(nextMode))
+  }
+
+  useEffect(() => {
+    if (levelRef.current !== null && levelInfo.levelIndex > levelRef.current) {
+      setLevelUp(levelInfo.name)
+      if (soundOn) speakText(`New level! ${levelInfo.name}!`, 'cheerful')
+    }
+    levelRef.current = levelInfo.levelIndex
+  }, [levelInfo.levelIndex])
+
+  useEffect(() => {
+    if (!levelUp) return
+    const timer = setTimeout(() => setLevelUp(null), 2600)
+    return () => clearTimeout(timer)
+  }, [levelUp])
 
   const triggerLearn = (label, word, emoji, type) => {
     setCurrentKey(label)
@@ -302,11 +380,12 @@ function App() {
     const nextStars = stars + 1
     const nextStreak = streak + 1
 
+    setAnswered(true)
     setPoints(nextPoints)
     setScore(nextScore)
     setStars(nextStars)
     setStreak(nextStreak)
-    setQuestionNumber((prev) => prev + 1)
+    setBestStreak((prev) => Math.max(prev, nextStreak))
 
     if (soundOn) {
       playCorrectSound()
@@ -314,15 +393,22 @@ function App() {
     }
     makeConfetti()
 
+    const answeredQuiz = quiz
     setTimeout(() => {
-      setQuiz(createQuizQuestion(quiz.type))
-    }, 450)
+      // Skip if the question already changed (e.g. the mode was switched).
+      if (quizIdRef.current !== answeredQuiz.id) return
+      setQuestionNumber((prev) => prev + 1)
+      showQuestion(createQuizQuestion(answeredQuiz.type, answeredQuiz.correct.key))
+    }, 1100)
   }
 
   const handleAnswerClick = (answer) => {
+    if (answered || wrongKeys.includes(answer.key)) return
+
     if (answer.key === quiz.correct.key) {
       handleCorrectAnswer()
     } else {
+      setWrongKeys((prev) => [...prev, answer.key])
       setStars((prev) => Math.max(prev - 1, 0))
       setStreak(0)
       if (soundOn) {
@@ -334,15 +420,17 @@ function App() {
 
   useEffect(() => {
     const handleKeyDown = (event) => {
+      if (event.ctrlKey || event.metaKey || event.altKey) return
       const key = event.key.toLowerCase()
 
-      if (mode === 'letters' && /^[a-z]$/.test(key)) {
+      if (view === 'quiz') {
+        const option = quiz.options[Number(key) - 1]
+        if (/^[1-4]$/.test(key) && option) handleAnswerClick(option)
+      } else if (mode === 'letters' && /^[a-z]$/.test(key)) {
         const letter = key.toUpperCase()
         const item = letterMap[key]
         triggerLearn(letter, item.word, item.emoji, 'letter')
-      }
-
-      if (mode === 'numbers' && /^[0-9]$/.test(key)) {
+      } else if (mode === 'numbers' && /^[1-9]$/.test(key)) {
         const value = Number(key)
         const item = numberMap[value]
         if (item) triggerLearn(String(value), item.word, item.emoji, 'number')
@@ -350,13 +438,13 @@ function App() {
 
       if (event.key === ' ') {
         event.preventDefault()
-        setMode((prev) => (prev === 'letters' ? 'numbers' : 'letters'))
+        switchMode()
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode, soundOn, voiceMode])
+  })
 
   const handleLetterPress = (letter) => {
     const key = letter.toLowerCase()
@@ -368,6 +456,16 @@ function App() {
     const item = numberMap[num]
     if (!item) return
     triggerLearn(String(num), item.word, item.emoji, 'number')
+  }
+
+  const resetProgress = () => {
+    if (!window.confirm('Start over? This clears points, stars and levels.')) return
+    setScore(0)
+    setPoints(0)
+    setStars(0)
+    setStreak(0)
+    setBestStreak(0)
+    setQuestionNumber(1)
   }
 
   const nextLevelLabel = levelInfo.nextLevel ? levelInfo.nextLevel.name : 'Master'
@@ -383,25 +481,37 @@ function App() {
           </div>
 
           <div className="header-actions">
-            <button className="sound-toggle" onClick={() => setSoundOn((prev) => !prev)}>
+            <button className="sound-toggle" aria-pressed={soundOn} onClick={() => setSoundOn((prev) => !prev)}>
               {soundOn ? '🔊 Sound On' : '🔇 Mute'}
+            </button>
+
+            <button
+              className="sound-toggle"
+              aria-pressed={musicOn}
+              disabled={!soundOn}
+              onClick={() => setMusicOn((prev) => !prev)}
+            >
+              {musicOn ? '🎵 Music On' : '🎵 Music Off'}
             </button>
 
             <div className="voice-switcher" aria-label="voice mode selector">
               <button
                 className={voiceMode === 'natural' ? 'voice-button active' : 'voice-button'}
+                aria-pressed={voiceMode === 'natural'}
                 onClick={() => setVoiceMode('natural')}
               >
                 Natural
               </button>
               <button
                 className={voiceMode === 'soft' ? 'voice-button active' : 'voice-button'}
+                aria-pressed={voiceMode === 'soft'}
                 onClick={() => setVoiceMode('soft')}
               >
                 Soft
               </button>
               <button
                 className={voiceMode === 'cheerful' ? 'voice-button active' : 'voice-button'}
+                aria-pressed={voiceMode === 'cheerful'}
                 onClick={() => setVoiceMode('cheerful')}
               >
                 Cheerful
@@ -415,7 +525,7 @@ function App() {
 
             <button
               className="mode-button"
-              onClick={() => setMode((prev) => (prev === 'letters' ? 'numbers' : 'letters'))}
+              onClick={switchMode}
             >
               {mode === 'letters' ? 'Switch to Numbers' : 'Switch to Letters'}
             </button>
@@ -436,13 +546,31 @@ function App() {
             </div>
             <small>{progressPercent}% to {nextLevelLabel}</small>
           </div>
+
+          <button className="reset-button" onClick={resetProgress}>
+            ↺ Start over
+          </button>
         </div>
 
+        {levelUp && (
+          <div className="level-up" role="status">
+            🏆 New level: {levelUp}!
+          </div>
+        )}
+
         <div className="toolbar">
-          <button className={view === 'learn' ? 'tool active' : 'tool'} onClick={() => setView('learn')}>
+          <button
+            className={view === 'learn' ? 'tool active' : 'tool'}
+            aria-pressed={view === 'learn'}
+            onClick={() => setView('learn')}
+          >
             Learn
           </button>
-          <button className={view === 'quiz' ? 'tool active' : 'tool'} onClick={() => setView('quiz')}>
+          <button
+            className={view === 'quiz' ? 'tool active' : 'tool'}
+            aria-pressed={view === 'quiz'}
+            onClick={() => setView('quiz')}
+          >
             Mini Quiz
           </button>
         </div>
@@ -477,8 +605,8 @@ function App() {
               </div>
               <p className="helper-text">
                 {mode === 'letters'
-                  ? 'Press any letter key or tap a card below.'
-                  : 'Press a number key or tap a number below.'}
+                  ? 'Press any letter key or tap a card below. Space switches to numbers.'
+                  : 'Press 1-9 or tap a number below. Space switches to letters.'}
               </p>
             </section>
 
@@ -509,27 +637,52 @@ function App() {
               </div>
 
               <div className="quiz-prompt">
-                <div className="quiz-badge">{quiz.type === 'letters' ? 'A-Z' : '1-100'}</div>
+                <div className="quiz-badge">{quiz.type === 'letters' ? 'A-Z' : '1-20'}</div>
+                {quiz.type === 'letters' ? (
+                  <div className="quiz-letter">{quiz.correct.key}</div>
+                ) : (
+                  <div className="count-grid" aria-label={`${quiz.correct.key} pictures`}>
+                    {Array.from({ length: quiz.correct.key }, (_, i) => (
+                      <span key={i}>{quiz.correct.emoji}</span>
+                    ))}
+                  </div>
+                )}
                 <strong>{quiz.prompt}</strong>
                 <small>Question {questionNumber}</small>
               </div>
 
               <div className="quiz-grid">
-                {quiz.options.map((option) => (
-                  <button
-                    key={`${quiz.type}-${option.key}-${Math.random()}`}
-                    className="quiz-option"
-                    onClick={() => handleAnswerClick(option)}
-                  >
-                    {quiz.type === 'letters' ? `${option.key} - ${option.word} ${option.emoji}` : `${option.key} - ${option.word} ${option.emoji}`}
-                  </button>
-                ))}
+                {quiz.options.map((option, index) => {
+                  const isWrong = wrongKeys.includes(option.key)
+                  const isRight = answered && option.key === quiz.correct.key
+                  const className = ['quiz-option', isWrong && 'wrong', isRight && 'right'].filter(Boolean).join(' ')
+
+                  return (
+                    <button
+                      key={`${quiz.id}-${option.key}`}
+                      className={className}
+                      disabled={isWrong || answered}
+                      onClick={() => handleAnswerClick(option)}
+                    >
+                      <span className="option-hint">{index + 1}</span>
+                      {quiz.type === 'letters' ? (
+                        <>
+                          <span className="option-emoji">{option.emoji}</span>
+                          <span>{option.word}</span>
+                        </>
+                      ) : (
+                        <span className="option-number">{option.key}</span>
+                      )}
+                    </button>
+                  )
+                })}
               </div>
 
               <div className="quiz-status">
                 <span>Score: {score}</span>
                 <span>Stars: {stars}</span>
                 <span>Points: {points}</span>
+                <span>Best streak: {bestStreak}</span>
               </div>
             </section>
           </main>
