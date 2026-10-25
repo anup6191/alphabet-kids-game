@@ -5,7 +5,7 @@ A playful educational game for young learners to explore letters, numbers, words
 ## Overview
 ABC & 123 Adventure is a kid-friendly learning app designed to help children:
 - recognize letters from A to Z
-- learn numbers and counting basics
+- learn numbers 1 to 20 and practice counting
 - connect letters and numbers to words and meanings
 - practice through mini quiz challenges
 - build confidence with score, stars, streaks, and levels
@@ -28,20 +28,31 @@ If you want to add real visuals later, place images in an `assets/` folder and r
 1. Open the app in the browser.
 2. Choose between the Letter mode and Number mode.
 3. Tap or click a letter/number card to hear the spoken word and see the matching emoji.
-4. Switch to the Mini Quiz mode to test recall.
-5. Earn stars and points for correct answers.
-6. Unlock higher levels as progress grows.
+4. Switch to the Mini Quiz to test recall:
+   - **Letters:** a big letter appears — pick the picture whose word starts with it.
+   - **Numbers:** count the pictures and pick the right number.
+5. Earn stars and points for correct answers. A wrong pick is marked so the child can try again.
+6. Unlock higher levels as progress grows. Progress is saved in the browser, and **Start over** resets it.
+
+### Keyboard controls
+| Key | Learn mode | Mini Quiz |
+| --- | --- | --- |
+| `A`–`Z` | Show a letter (Letter mode) | — |
+| `1`–`9` | Show a number (Number mode) | Pick answer 1–4 |
+| `Space` | Switch Letters / Numbers | Switch Letters / Numbers |
 
 ## Features
 - Letter learning mode for A–Z
 - Number learning mode
 - Rich emoji-based visual learning
-- Sound effects and background music
-- Browser-based voice narration
-- Quiz challenge mode
-- Progress tracking with points and badges
+- Sound effects and optional background music (separate toggle, off by default)
+- Browser-based voice narration with Natural, Soft and Cheerful styles
+- Quiz challenge mode with letter recognition and counting questions
+- Progress tracking with points, stars, streaks and level-up celebrations
+- Progress and settings saved in the browser (localStorage)
 - Responsive design for desktop and mobile
 - Keyboard support for quick gameplay
+- Accessible controls (visible focus, pressed states, reduced-motion support)
 
 ## Tech Stack
 - React
@@ -60,13 +71,13 @@ If you want to add real visuals later, place images in an `assets/` folder and r
 ├── netlify.toml
 ├── .gitignore
 ├── README.md
-├── src/
-│   ├── App.jsx
-│   ├── App.css
-│   └── main.jsx
-├── public/
-└── dist/
+└── src/
+    ├── App.jsx
+    ├── App.css
+    └── main.jsx
 ```
+
+`npm run build` writes the production site to `dist/` (git-ignored).
 
 ## Getting Started
 
@@ -114,7 +125,6 @@ Important:
 This project is an educational demo and front-end learning app.
 It is ready for further enhancements such as:
 - more advanced lesson flow
-- persistent score tracking
 - parent dashboard and analytics
 - more realistic AI voice integration
 - richer classroom-style learning modes
