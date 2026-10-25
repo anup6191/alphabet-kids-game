@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+
+const LEVELS = [
+  { name: 'Starter', min: 0, color: '#ffd166' },
+  { name: 'Explorer', min: 20, color: '#7bdff2' },
+  { name: 'Super Star', min: 50, color: '#7ee081' },
+  { name: 'Quiz Hero', min: 90, color: '#a78bfa' },
+  { name: 'Alphabet King', min: 140, color: '#ff7eb6' }
+]
 
 const letterMap = {
   a: { word: 'Apple', emoji: '🍎' },
@@ -52,15 +60,25 @@ const numberMap = {
   20: { word: 'Twenty', emoji: '🌟' }
 }
 
-const allLetters = Object.entries(letterMap).map(([key, value]) => ({
-  key: key.toUpperCase(),
-  ...value
-}))
+const allLetters = Object.entries(letterMap).map(([key, value]) => ({ key: key.toUpperCase(), ...value }))
+const allNumbers = Object.entries(numberMap).map(([key, value]) => ({ key: Number(key), ...value }))
 
-const allNumbers = Object.entries(numberMap).map(([key, value]) => ({
-  key: Number(key),
-  ...value
-}))
+function getLevelInfo(points) {
+  let level = LEVELS[0]
+  for (const item of LEVELS) {
+    if (points >= item.min) level = item
+  }
+  const levelIndex = LEVELS.findIndex((item) => item.name === level.name)
+  const nextLevel = LEVELS[levelIndex + 1] || null
+  const progressValue = nextLevel ? ((points - level.min) / (nextLevel.min - level.min)) * 100 : 100
+
+  return {
+    ...level,
+    levelIndex,
+    nextLevel,
+    progressValue: Math.min(Math.max(progressValue, 0), 100)
+  }
+}
 
 function playTone(frequency = 440, duration = 0.24, volume = 0.04) {
   const AudioCtx = window.AudioContext || window.webkitAudioContext
@@ -124,17 +142,91 @@ function App() {
   const [currentWord, setCurrentWord] = useState('Apple')
   const [currentEmoji, setCurrentEmoji] = useState('🍎')
   const [score, setScore] = useState(0)
+  const [points, setPoints] = useState(0)
   const [stars, setStars] = useState(0)
   const [quiz, setQuiz] = useState(() => createQuizQuestion('letters'))
   const [confetti, setConfetti] = useState([])
+  const [soundOn, setSoundOn] = useState(true)
+  const [questionNumber, setQuestionNumber] = useState(1)
+  const [streak, setStreak] = useState(0)
+
+  const musicRef = useRef({ interval: null, context: null })
 
   const letters = useMemo(() => allLetters, [])
   const numbers = useMemo(() => allNumbers, [])
+  const levelInfo = useMemo(() => getLevelInfo(points), [points])
+
+  const startMusic = () => {
+    if (!soundOn) return
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext
+    if (!AudioCtx) return
+
+    if (musicRef.current.context) return
+
+    const context = new AudioCtx()
+    const master = context.createGain()
+    master.gain.value = 0.04
+    master.connect(context.destination)
+
+    const notes = [261.63, 329.63, 392.0, 523.25, 392.0, 329.63]
+    let index = 0
+
+    const playNote = () => {
+      const note = notes[index % notes.length]
+      const oscillator = context.createOscillator()
+      const gain = context.createGain()
+      oscillator.type = 'sine'
+      oscillator.frequency.value = note
+      gain.gain.value = 0.0001
+      oscillator.connect(gain)
+      gain.connect(master)
+      oscillator.start()
+      const now = context.currentTime
+      gain.gain.exponentialRampToValueAtTime(0.03, now + 0.02)
+      gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.22)
+      oscillator.stop(now + 0.25)
+      index += 1
+    }
+
+    playNote()
+    musicRef.current.interval = window.setInterval(playNote, 440)
+    musicRef.current.context = context
+  }
+
+  const stopMusic = () => {
+    if (musicRef.current.interval) {
+      window.clearInterval(musicRef.current.interval)
+      musicRef.current.interval = null
+    }
+
+    if (musicRef.current.context) {
+      musicRef.current.context.close().catch(() => {})
+      musicRef.current.context = null
+    }
+  }
+
+  useEffect(() => {
+    if (soundOn) {
+      startMusic()
+    } else {
+      stopMusic()
+      if ('speechSynthesis' in window) {
+        window.speechSynthesis.cancel()
+      }
+    }
+
+    return () => {
+      stopMusic()
+    }
+  }, [soundOn])
 
   const triggerLearn = (label, word, emoji, type) => {
     setCurrentKey(label)
     setCurrentWord(word)
     setCurrentEmoji(emoji)
+
+    if (!soundOn) return
 
     if (type === 'letter') {
       speakText(`${label} for ${word}`)
@@ -146,11 +238,11 @@ function App() {
   }
 
   const makeConfetti = () => {
-    const pieces = Array.from({ length: 24 }, (_, i) => ({
+    const pieces = Array.from({ length: 26 }, (_, i) => ({
       id: i,
       left: Math.random() * 100,
       delay: Math.random() * 0.3,
-      duration: 1.5 + Math.random() * 1.2,
+      duration: 1.4 + Math.random() * 1.2,
       color: ['#ff7eb6', '#ffd166', '#7bdff2', '#7ee081', '#a78bfa'][i % 5],
       size: 8 + Math.random() * 12
     }))
@@ -158,11 +250,22 @@ function App() {
     setTimeout(() => setConfetti([]), 2200)
   }
 
-  const handleCorrectAnswer = (selected) => {
-    setScore((prev) => prev + 1)
-    setStars((prev) => prev + 1)
-    playCorrectSound()
-    speakText('Yay! Great job!')
+  const handleCorrectAnswer = () => {
+    const nextPoints = points + 10
+    const nextScore = score + 1
+    const nextStars = stars + 1
+    const nextStreak = streak + 1
+
+    setPoints(nextPoints)
+    setScore(nextScore)
+    setStars(nextStars)
+    setStreak(nextStreak)
+    setQuestionNumber((prev) => prev + 1)
+
+    if (soundOn) {
+      playCorrectSound()
+      speakText('Yay! Great job!')
+    }
     makeConfetti()
 
     setTimeout(() => {
@@ -172,11 +275,14 @@ function App() {
 
   const handleAnswerClick = (answer) => {
     if (answer.key === quiz.correct.key) {
-      handleCorrectAnswer(answer)
+      handleCorrectAnswer()
     } else {
       setStars((prev) => Math.max(prev - 1, 0))
-      speakText('Try again!')
-      playTone(220, 0.12, 0.05)
+      setStreak(0)
+      if (soundOn) {
+        playTone(220, 0.12, 0.05)
+        speakText('Try again!')
+      }
     }
   }
 
@@ -204,7 +310,7 @@ function App() {
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [mode])
+  }, [mode, soundOn])
 
   const handleLetterPress = (letter) => {
     const key = letter.toLowerCase()
@@ -218,6 +324,9 @@ function App() {
     triggerLearn(String(num), item.word, item.emoji, 'number')
   }
 
+  const nextLevelLabel = levelInfo.nextLevel ? levelInfo.nextLevel.name : 'Master'
+  const progressPercent = Math.round(levelInfo.progressValue)
+
   return (
     <div className="app-shell">
       <div className="container">
@@ -228,10 +337,15 @@ function App() {
           </div>
 
           <div className="header-actions">
+            <button className="sound-toggle" onClick={() => setSoundOn((prev) => !prev)}>
+              {soundOn ? '🔊 Sound On' : '🔇 Mute'}
+            </button>
+
             <div className="score-box">
               <span>⭐ {stars}</span>
-              <small>Score</small>
+              <small>Points {points}</small>
             </div>
+
             <button
               className="mode-button"
               onClick={() => setMode((prev) => (prev === 'letters' ? 'numbers' : 'letters'))}
@@ -240,6 +354,22 @@ function App() {
             </button>
           </div>
         </header>
+
+        <div className="level-strip">
+          <div className="badge-wrap">
+            <span className="level-badge" style={{ background: levelInfo.color }}>
+              {levelInfo.name}
+            </span>
+            <span className="next-level">Next: {nextLevelLabel}</span>
+          </div>
+
+          <div className="progress-block">
+            <div className="progress-bar">
+              <div className="progress-fill" style={{ width: `${progressPercent}%`, background: levelInfo.color }} />
+            </div>
+            <small>{progressPercent}% to {nextLevelLabel}</small>
+          </div>
+        </div>
 
         <div className="toolbar">
           <button className={view === 'learn' ? 'tool active' : 'tool'} onClick={() => setView('learn')}>
@@ -306,16 +436,21 @@ function App() {
         ) : (
           <main className="quiz-panel">
             <section className="quiz-card">
-              <p className="quiz-title">Mini Quiz</p>
+              <div className="quiz-header-row">
+                <p className="quiz-title">Mini Quiz</p>
+                <span className="streak-pill">🔥 Streak {streak}</span>
+              </div>
+
               <div className="quiz-prompt">
                 <div className="quiz-badge">{quiz.type === 'letters' ? 'A-Z' : '1-100'}</div>
                 <strong>{quiz.prompt}</strong>
+                <small>Question {questionNumber}</small>
               </div>
 
               <div className="quiz-grid">
                 {quiz.options.map((option) => (
                   <button
-                    key={option.key}
+                    key={`${quiz.type}-${option.key}-${Math.random()}`}
                     className="quiz-option"
                     onClick={() => handleAnswerClick(option)}
                   >
@@ -327,6 +462,7 @@ function App() {
               <div className="quiz-status">
                 <span>Score: {score}</span>
                 <span>Stars: {stars}</span>
+                <span>Points: {points}</span>
               </div>
             </section>
           </main>
