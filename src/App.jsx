@@ -37,6 +37,14 @@ const letterMap = {
   z: { word: 'Zebra', emoji: '🦓' }
 }
 
+// Spellings the browser voice reads as each letter's phonics sound (A as in Apple).
+const phonicsMap = {
+  a: 'ah', b: 'buh', c: 'kuh', d: 'duh', e: 'eh', f: 'fuh', g: 'guh', h: 'huh',
+  i: 'ih', j: 'juh', k: 'kuh', l: 'luh', m: 'muh', n: 'nuh', o: 'aw', p: 'puh',
+  q: 'kwuh', r: 'ruh', s: 'sss', t: 'tuh', u: 'uh', v: 'vuh', w: 'wuh', x: 'ks',
+  y: 'yuh', z: 'zzz'
+}
+
 const numberMap = {
   1: { word: 'One', emoji: '🎯' },
   2: { word: 'Two', emoji: '👟' },
@@ -135,8 +143,11 @@ function playCorrectSound() {
   setTimeout(() => playTone(1040, 0.18, 0.06), 240)
 }
 
-function speakText(text, mode = 'natural') {
-  if (!('speechSynthesis' in window)) return
+function speakText(text, mode = 'natural', onEnd = null) {
+  if (!('speechSynthesis' in window)) {
+    onEnd?.()
+    return
+  }
 
   const utterance = new SpeechSynthesisUtterance(text)
   const applyVoice = () => {
@@ -157,8 +168,23 @@ function speakText(text, mode = 'natural') {
   utterance.pitch = mode === 'soft' ? 1.45 : mode === 'cheerful' ? 1.8 : 1.65
   utterance.volume = 1
 
-  window.speechSynthesis.cancel()
-  window.speechSynthesis.speak(utterance)
+  // Some browsers never fire onend, so a timeout keeps the lesson moving.
+  let finished = false
+  const finish = () => {
+    if (finished || !onEnd) return
+    finished = true
+    onEnd()
+  }
+  utterance.onend = finish
+  utterance.onerror = finish
+  if (onEnd) setTimeout(finish, 3500)
+
+  try {
+    window.speechSynthesis.cancel()
+    window.speechSynthesis.speak(utterance)
+  } catch {
+    finish()
+  }
 }
 
 const STORAGE_KEY = 'abc-123-adventure'
@@ -214,6 +240,7 @@ function App() {
   const [currentKey, setCurrentKey] = useState('A')
   const [currentWord, setCurrentWord] = useState('Apple')
   const [currentEmoji, setCurrentEmoji] = useState('🍎')
+  const [lessonStep, setLessonStep] = useState('sound')
   const [score, setScore] = useState(saved.score || 0)
   const [points, setPoints] = useState(saved.points || 0)
   const [stars, setStars] = useState(saved.stars || 0)
@@ -232,6 +259,7 @@ function App() {
   const musicRef = useRef({ interval: null, context: null })
   const levelRef = useRef(null)
   const quizIdRef = useRef(quiz.id)
+  const lessonRef = useRef(0)
 
   const letters = useMemo(() => allLetters, [])
   const numbers = useMemo(() => allNumbers, [])
@@ -324,6 +352,8 @@ function App() {
   const switchMode = () => {
     const nextMode = mode === 'letters' ? 'numbers' : 'letters'
     const first = nextMode === 'letters' ? allLetters[0] : allNumbers[0]
+    lessonRef.current += 1
+    setLessonStep('sound')
     setMode(nextMode)
     setCurrentKey(String(first.key))
     setCurrentWord(first.word)
@@ -345,20 +375,51 @@ function App() {
     return () => clearTimeout(timer)
   }, [levelUp])
 
+  // Letter lesson in three steps: "A for" -> apple picture + "Apple" -> phonics "a, a, a".
+  const runLetterLesson = (label, word) => {
+    lessonRef.current += 1
+    const lessonId = lessonRef.current
+    const sound = phonicsMap[label.toLowerCase()]
+
+    const step = (text, mode, next) => {
+      const advance = () => {
+        if (lessonRef.current === lessonId) next()
+      }
+      if (soundOn) {
+        speakText(text, mode, advance)
+      } else {
+        setTimeout(advance, 900)
+      }
+    }
+
+    setLessonStep('letter')
+    if (soundOn) playTone(520 + label.charCodeAt(0) * 2, 0.24, 0.045)
+
+    step(`${label}. for`, voiceMode, () => {
+      setLessonStep('picture')
+      step(word, voiceMode, () => {
+        setLessonStep('sound')
+        if (soundOn) speakText(`${sound}. ${sound}. ${sound}.`, 'soft')
+      })
+    })
+  }
+
   const triggerLearn = (label, word, emoji, type) => {
     setCurrentKey(label)
     setCurrentWord(word)
     setCurrentEmoji(emoji)
 
+    if (type === 'letter') {
+      runLetterLesson(label, word)
+      return
+    }
+
+    lessonRef.current += 1
+    setLessonStep('sound')
     if (!soundOn) return
 
-    if (type === 'letter') {
-      speakText(`${label} for ${word}`, voiceMode)
-      playTone(520 + label.charCodeAt(0) * 2, 0.24, 0.045)
-    } else {
-      speakText(`${label} ${word}`, voiceMode)
-      playTone(240 + Number(label) * 12, 0.28, 0.05)
-    }
+    speakText(`${label} ${word}`, voiceMode)
+    playTone(240 + Number(label) * 12, 0.28, 0.05)
   }
 
   const makeConfetti = () => {
@@ -598,11 +659,27 @@ function App() {
           <main className="game-panel">
             <section className="display-card">
               <span className="tag">{mode === 'letters' ? 'Alphabet lesson' : 'Number lesson'}</span>
-              <div className="big-item">{currentKey}</div>
-              <div className="emoji-bubble">{currentEmoji}</div>
-              <div className="word-line">
-                {mode === 'letters' ? `${currentKey} for ${currentWord}` : `${currentKey} means ${currentWord}`}
+              <div key={`letter-${currentKey}`} className="big-item">
+                {currentKey}
               </div>
+              <div
+                key={`picture-${currentKey}-${lessonStep === 'letter'}`}
+                className={lessonStep === 'letter' ? 'emoji-bubble waiting' : 'emoji-bubble'}
+              >
+                {lessonStep === 'letter' ? '❔' : currentEmoji}
+              </div>
+              <div className="word-line">
+                {mode === 'numbers'
+                  ? `${currentKey} means ${currentWord}`
+                  : lessonStep === 'letter'
+                    ? `${currentKey} for…`
+                    : `${currentKey} for ${currentWord}`}
+              </div>
+              {mode === 'letters' && (
+                <div className={lessonStep === 'sound' ? 'phonics-line show' : 'phonics-line'} aria-live="polite">
+                  🔊 {Array(3).fill(currentKey.toLowerCase()).join(' – ')}
+                </div>
+              )}
               <p className="helper-text">
                 {mode === 'letters'
                   ? 'Press any letter key or tap a card below. Space switches to numbers.'

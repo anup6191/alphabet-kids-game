@@ -27,7 +27,12 @@ If you want to add real visuals later, place images in an `assets/` folder and r
 ## How to Play
 1. Open the app in the browser.
 2. Choose between the Letter mode and Number mode.
-3. Tap or click a letter/number card to hear the spoken word and see the matching emoji.
+3. Tap or click a letter/number card (or press its key) to start a lesson. In Letter mode it runs in three steps:
+   1. The letter appears and the narrator says **"A for…"**
+   2. The picture appears and the narrator says **"Apple"**
+   3. The phonics sound plays: **"a… a… a…"** (the short sound, as in *apple*)
+
+   With sound muted, the same steps still play on screen.
 4. Switch to the Mini Quiz to test recall:
    - **Letters:** a big letter appears — pick the picture whose word starts with it.
    - **Numbers:** count the pictures and pick the right number.
